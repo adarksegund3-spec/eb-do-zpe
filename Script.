@@ -1,0 +1,1462 @@
+--[[
+    EB DO ZPE SCRIPT
+    Criador: Neylad (discord)
+    Abas: Parkour | Combate | JJs | Creditos
+]]
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+--------------------------------------------------------------------
+-- CONFIG
+--------------------------------------------------------------------
+local JJS_URL = "https://pastebin.com/raw/HQwt3Vs1"
+
+--------------------------------------------------------------------
+-- PARKOURS (os dados ficam no pastebin)
+--------------------------------------------------------------------
+local ZPData = { macros = {}, states = {}, anims = {} }
+
+-- Link RAW do pastebin com os DADOS (eb_do_zp_dados)
+local DATA_URL = "https://pastebin.com/raw/8snNbeHV"
+
+-- Blocos da aba Parkour (na ordem em que aparecem):
+-- { titulo, { {nome da opcao, id}, ... } }   | id = nil -> "em breve"
+local RAPIDO = "R\u{00E1}pido"
+local SEMBURLA = "Sem burla"
+
+local PARKOUR_BLOCKS = {
+    { "Parkour Civil", { { RAPIDO, "civil_rapido" },    { SEMBURLA, "civil_semburla" } } },
+    { "Torre Civil",   { { "Torre 1", "torre_civil_1" }, { "Torre 2", "torre_civil_2" } } },
+    { "Parkour 1",     { { RAPIDO, "parkour1_rapido" }, { SEMBURLA, "parkour1_semburla" } } },
+    { "Parkour 2",     { { "Torre 1", "torre_1" },      { "Torre 2", "torre_2" } } },
+    { "Parkour 3",     { { RAPIDO, "parkour3_rapido" }, { SEMBURLA, "parkour3_semburla" } } },
+    { "Parkour 4",     { { RAPIDO, "parkour4_rapido" }, { SEMBURLA, "parkour4_semburla" } } },
+    { "Parkour 5",     { { RAPIDO, "parkour5_rapido" }, { SEMBURLA, "parkour5_semburla" } } },
+    { "Parkour 6",     { { RAPIDO, "parkour6_rapido" }, { SEMBURLA, "parkour6_semburla" } } },
+}
+
+local GREEN = Color3.fromRGB(120, 255, 180)
+local TEXT = Color3.fromRGB(235, 245, 240)
+local MUTED = Color3.fromRGB(140, 160, 150)
+local CARD = Color3.fromRGB(14, 17, 15)
+local TRACK = Color3.fromRGB(30, 38, 34)
+
+--------------------------------------------------------------------
+-- HELPERS
+--------------------------------------------------------------------
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+
+local function corner(inst, r)
+    return new("UICorner", { CornerRadius = UDim.new(0, r) }, inst)
+end
+
+local function stroke(inst, color, thick, transp)
+    return new("UIStroke", {
+        Color = color, Thickness = thick, Transparency = transp,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, inst)
+end
+
+local function label(parent, text, size, font, color)
+    return new("TextLabel", {
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+        Text = text, TextSize = size, Font = font, TextColor3 = color,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, parent)
+end
+
+local function tween(inst, t, props)
+    local tw = TweenService:Create(inst, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+    tw:Play()
+    return tw
+end
+
+local function tweenEx(inst, t, style, dir, delay, props)
+    local tw = TweenService:Create(inst, TweenInfo.new(t, style, dir, 0, false, delay or 0), props)
+    tw:Play()
+    return tw
+end
+
+local function strokeGradient(stk)
+    return new("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 45, 35)),
+            ColorSequenceKeypoint.new(0.5, GREEN),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(25, 45, 35)),
+        }),
+    }, stk)
+end
+
+local function addShine(parent)
+    local f = new("Frame", {
+        Name = "Shine", Size = UDim2.new(1, 0, 1, 0), ZIndex = 0,
+        BackgroundColor3 = Color3.fromRGB(200, 255, 225), BorderSizePixel = 0,
+    }, parent)
+    return new("UIGradient", {
+        Rotation = 25, Offset = Vector2.new(-1, 0),
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.4, 1),
+            NumberSequenceKeypoint.new(0.5, 0.93),
+            NumberSequenceKeypoint.new(0.6, 1),
+            NumberSequenceKeypoint.new(1, 1),
+        }),
+    }, f)
+end
+
+--------------------------------------------------------------------
+-- GUI ROOT
+--------------------------------------------------------------------
+local GUI_NAME = "NeyladMenuGui"
+
+pcall(function()
+    local old = LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild(GUI_NAME)
+    if old then old:Destroy() end
+end)
+pcall(function()
+    local old = game:GetService("CoreGui"):FindFirstChild(GUI_NAME)
+    if old then old:Destroy() end
+end)
+pcall(function()
+    if gethui then
+        local old = gethui():FindFirstChild(GUI_NAME)
+        if old then old:Destroy() end
+    end
+end)
+
+for _, getRoot in ipairs({
+    function() return LocalPlayer:FindFirstChild("PlayerGui") end,
+    function() return game:GetService("CoreGui") end,
+    function() return gethui and gethui() end,
+}) do
+    pcall(function()
+        local root = getRoot()
+        local old = root and root:FindFirstChild("NeyladHitboxGui")
+        if old then old:Destroy() end
+    end)
+end
+
+local gui = new("ScreenGui", {
+    Name = GUI_NAME, ResetOnSpawn = false, IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999,
+})
+
+local function attach()
+    local targets = {}
+    if gethui then table.insert(targets, function() return gethui() end) end
+    table.insert(targets, function() return game:GetService("CoreGui") end)
+    table.insert(targets, function() return LocalPlayer:WaitForChild("PlayerGui") end)
+    for _, get in ipairs(targets) do
+        local ok, target = pcall(get)
+        if ok and target then
+            local ok2 = pcall(function() gui.Parent = target end)
+            if ok2 and gui.Parent == target then return end
+        end
+    end
+end
+attach()
+
+local connections = {}
+
+--------------------------------------------------------------------
+-- ARRASTAR (generico) - com suporte a "toque" (clique sem arrastar)
+--------------------------------------------------------------------
+local function makeDrag(handle, target, onTap, onPress, onRelease, bucket)
+    local dragging, dragStart, startPos, moved = false, nil, nil, false
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            moved = false
+            dragStart = input.Position
+            startPos = target.Position
+            if onPress then onPress() end
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if onRelease then onRelease() end
+                    if onTap and not moved then onTap() end
+                end
+            end)
+        end
+    end)
+
+    table.insert(bucket or connections, UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            if d.Magnitude > 6 then moved = true end
+            if moved or not onTap then
+                target.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + d.X,
+                    startPos.Y.Scale, startPos.Y.Offset + d.Y
+                )
+            end
+        end
+    end))
+end
+
+--------------------------------------------------------------------
+-- LOGO (retangulo arredondado deitado)
+--------------------------------------------------------------------
+local Logo = new("Frame", {
+    Name = "Logo", AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0, 56),
+    Size = UDim2.fromOffset(150, 44),
+    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+    BorderSizePixel = 0, ClipsDescendants = true, Active = true,
+}, gui)
+corner(Logo, 14)
+new("UIGradient", {
+    Rotation = 20,
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
+        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(10, 14, 12)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
+    }),
+}, Logo)
+local logoStroke = stroke(Logo, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
+local logoStrokeGrad = strokeGradient(logoStroke)
+local logoShine = addShine(Logo)
+local logoScale = new("UIScale", { Scale = 0 }, Logo)
+
+local logoDot = new("Frame", {
+    Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
+    BackgroundColor3 = GREEN, BorderSizePixel = 0,
+}, Logo)
+corner(logoDot, 4)
+
+local logoTitle = label(Logo, "EB DO ZPE", 15, Enum.Font.GothamBold, TEXT)
+logoTitle.Position = UDim2.new(0, 34, 0, 6)
+logoTitle.Size = UDim2.new(1, -44, 0, 18)
+
+local logoSub = label(Logo, "SCRIPT", 10, Enum.Font.GothamMedium, GREEN)
+logoSub.Position = UDim2.new(0, 34, 0, 24)
+logoSub.Size = UDim2.new(1, -44, 0, 14)
+
+--------------------------------------------------------------------
+-- HOLDER (CanvasGroup: permite fade + escala na animacao)
+--------------------------------------------------------------------
+local MAIN_W, MAIN_H = 340, 270
+local BAR_H, GAP, PAD = 44, 8, 8
+local TOTAL_H = MAIN_H + GAP + BAR_H
+
+local Holder = new("CanvasGroup", {
+    Name = "Holder", BackgroundTransparency = 1,
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    Size = UDim2.fromOffset(MAIN_W + PAD * 2, TOTAL_H + PAD * 2),
+    GroupTransparency = 1, Visible = false,
+}, gui)
+local holderScale = new("UIScale", { Scale = 0.88 }, Holder)
+
+local Inner = new("Frame", {
+    Name = "Inner", BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(PAD, PAD),
+    Size = UDim2.fromOffset(MAIN_W, TOTAL_H),
+}, Holder)
+
+--------------------------------------------------------------------
+-- MENU PRINCIPAL
+--------------------------------------------------------------------
+local Main = new("Frame", {
+    Name = "Main", Size = UDim2.new(1, 0, 0, MAIN_H),
+    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+    BorderSizePixel = 0, ClipsDescendants = true,
+}, Inner)
+corner(Main, 18)
+new("UIGradient", {
+    Rotation = 65,
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
+        ColorSequenceKeypoint.new(0.55, Color3.fromRGB(10, 14, 12)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
+    }),
+}, Main)
+local mainStroke = stroke(Main, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
+local mainStrokeGrad = strokeGradient(mainStroke)
+local mainShine = addShine(Main)
+
+local TitleBar = new("Frame", {
+    Name = "TitleBar", Size = UDim2.new(1, 0, 0, 44),
+    BackgroundTransparency = 1,
+}, Main)
+
+local dot = new("Frame", {
+    Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
+    BackgroundColor3 = GREEN, BorderSizePixel = 0,
+}, TitleBar)
+corner(dot, 4)
+
+local title = label(TitleBar, "EB DO ZPE SCRIPT", 15, Enum.Font.GothamBold, TEXT)
+title.Position = UDim2.new(0, 32, 0, 0)
+title.Size = UDim2.new(1, -90, 1, 0)
+
+local CloseBtn = new("TextButton", {
+    Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -40, 0.5, -14),
+    BackgroundColor3 = Color3.fromRGB(22, 28, 25), AutoButtonColor = false,
+    Text = "X", TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = MUTED,
+}, TitleBar)
+corner(CloseBtn, 14)
+stroke(CloseBtn, GREEN, 1, 0.8)
+CloseBtn.MouseEnter:Connect(function() tween(CloseBtn, 0.15, { TextColor3 = GREEN }) end)
+CloseBtn.MouseLeave:Connect(function() tween(CloseBtn, 0.15, { TextColor3 = MUTED }) end)
+
+new("Frame", {
+    Size = UDim2.new(1, -32, 0, 1), Position = UDim2.new(0, 16, 0, 44),
+    BackgroundColor3 = GREEN, BackgroundTransparency = 0.85, BorderSizePixel = 0,
+}, Main)
+
+local Content = new("Frame", {
+    Name = "Content", BackgroundTransparency = 1,
+    Position = UDim2.new(0, 12, 0, 52), Size = UDim2.new(1, -24, 1, -62),
+}, Main)
+
+--------------------------------------------------------------------
+-- HOTBAR (separada do menu, mas dentro do mesmo grupo)
+--------------------------------------------------------------------
+local HOTBAR_Y = MAIN_H + GAP
+local HOTBAR_Y_HIDDEN = MAIN_H - 24
+
+local Hotbar = new("Frame", {
+    Name = "Hotbar", AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, HOTBAR_Y),
+    Size = UDim2.fromOffset(324, BAR_H),
+    BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0,
+}, Inner)
+corner(Hotbar, 22)
+new("UIGradient", {
+    Rotation = 0,
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(24, 58, 42)),
+    }),
+}, Hotbar)
+local barStroke = stroke(Hotbar, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
+local barStrokeGrad = strokeGradient(barStroke)
+
+local barInner = new("Frame", {
+    Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+}, Hotbar)
+new("UIPadding", {
+    PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6),
+    PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
+}, barInner)
+new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    VerticalAlignment = Enum.VerticalAlignment.Center,
+    Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder,
+}, barInner)
+
+-- menu e hotbar arrastam juntos (arrastando o Holder)
+makeDrag(TitleBar, Holder)
+makeDrag(Hotbar, Holder)
+
+--------------------------------------------------------------------
+-- COMPONENTES
+--------------------------------------------------------------------
+local function makeCard(parent)
+    local c = new("Frame", {
+        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+    }, parent)
+    corner(c, 12)
+    stroke(c, GREEN, 1, 0.82)
+    return c
+end
+
+local function makePage()
+    local p = new("ScrollingFrame", {
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 1, 0), CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = GREEN,
+        Visible = false,
+    }, Content)
+    new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, p)
+    new("UIPadding", { PaddingRight = UDim.new(0, 4) }, p)
+    return p
+end
+
+-- card simples de "abrir algo" (titulo + descricao + botao redondo >)
+local function makeOpenCard(page, titleText, descText, onClick)
+    local c = new("Frame", {
+        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 76),
+    }, page)
+    corner(c, 12)
+    stroke(c, GREEN, 1, 0.82)
+
+    local t = label(c, titleText, 16, Enum.Font.GothamBold, TEXT)
+    t.Position = UDim2.new(0, 16, 0, 16)
+    t.Size = UDim2.new(1, -90, 0, 20)
+
+    local d = label(c, descText, 12, Enum.Font.Gotham, MUTED)
+    d.Position = UDim2.new(0, 16, 0, 38)
+    d.Size = UDim2.new(1, -90, 0, 18)
+
+    local btn = new("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -14, 0.5, 0),
+        Size = UDim2.fromOffset(46, 46), BackgroundColor3 = GREEN,
+        AutoButtonColor = false, Text = ">", TextSize = 22,
+        Font = Enum.Font.GothamBold, TextColor3 = Color3.fromRGB(8, 18, 12),
+    }, c)
+    corner(btn, 23)
+    new("UIGradient", {
+        Rotation = 90,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 255, 210)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(70, 200, 130)),
+        }),
+    }, btn)
+
+    btn.MouseButton1Down:Connect(function() tween(btn, 0.08, { Size = UDim2.fromOffset(40, 40) }) end)
+    btn.MouseButton1Up:Connect(function() tween(btn, 0.12, { Size = UDim2.fromOffset(46, 46) }) end)
+    btn.MouseLeave:Connect(function() tween(btn, 0.12, { Size = UDim2.fromOffset(46, 46) }) end)
+    btn.MouseButton1Click:Connect(function() onClick(d) end)
+
+    return c, d
+end
+
+--------------------------------------------------------------------
+-- MOTOR DOS PARKOURS (decodifica e toca as gravacoes)
+--------------------------------------------------------------------
+local macroCache = {}
+local Macro = { cleanup = nil, token = 0 }
+local setStatus = function() end -- trocado quando a pagina for criada
+
+local B64 = {}
+do
+    local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    for i = 1, #chars do B64[string.byte(chars, i)] = i - 1 end
+end
+
+local function b64decode(s)
+    s = s:gsub("%s+", "")
+    local out, n = {}, 0
+    for i = 1, #s, 4 do
+        local a, b, c, d = string.byte(s, i, i + 3)
+        a, b = B64[a], B64[b]
+        c = c and B64[c]
+        d = d and B64[d]
+        n += 1; out[n] = a * 4 + math.floor(b / 16)
+        if c then n += 1; out[n] = (b % 16) * 16 + math.floor(c / 4) end
+        if d then n += 1; out[n] = (c % 4) * 64 + d end
+    end
+    return out
+end
+
+local function getFrames(id)
+    if macroCache[id] then return macroCache[id] end
+    if not next(ZPData.macros) then
+        local ok, d = pcall(function() return loadstring(game:HttpGet(DATA_URL))() end)
+        if not ok or type(d) ~= "table" or type(d.macros) ~= "table" then
+            return nil, "falha ao baixar os dados"
+        end
+        ZPData.macros, ZPData.states, ZPData.anims = d.macros, d.states, d.anims
+    end
+    local text = ZPData.macros[id]
+    if not text then return nil, "sem dados" end
+
+    local bytes = b64decode(text)
+    local pos = 1
+    local function rv()
+        local r, shift = 0, 1
+        while true do
+            local b = bytes[pos]
+            pos += 1
+            if b < 128 then return r + b * shift end
+            r += (b - 128) * shift
+            shift *= 128
+        end
+    end
+    local function rz()
+        local v = rv()
+        if v % 2 == 0 then return v / 2 else return -(v + 1) / 2 end
+    end
+
+    local ok, frames = pcall(function()
+        local n = rv()
+        local fr = {}
+        local t, x, y, z, yaw = 0, 0, 0, 0, 0
+        for i = 1, n do
+            t += rz(); x += rz(); y += rz(); z += rz(); yaw += rz()
+            local px, py, pz = x / 100, y / 100, z / 100
+            fr[i] = {
+                t = t / 1000,
+                pos = Vector3.new(px, py, pz),
+                cf = CFrame.new(px, py, pz) * CFrame.Angles(0, yaw / 1000, 0),
+            }
+            if i % 500 == 0 then task.wait() end
+        end
+
+        local k = 1
+        for _ = 1, rv() do -- estados (Running, Jumping, ...)
+            local len, si = rv(), rv()
+            local name = ZPData.states[si]
+            for _ = 1, len do
+                if fr[k] then fr[k].state = name end
+                k += 1
+            end
+        end
+
+        k = 1
+        for _ = 1, rv() do -- animacao dominante
+            local len, ai = rv(), rv()
+            local anim = ai > 0 and ZPData.anims[ai] or nil
+            for _ = 1, len do
+                if fr[k] then fr[k].anim = anim end
+                k += 1
+            end
+        end
+
+        -- velocidade derivada das posicoes
+        for i = 1, n - 1 do
+            local a, b = fr[i], fr[i + 1]
+            local dt = b.t - a.t
+            local d = b.pos - a.pos
+            if dt > 0.004 and d.Magnitude < 8 then a.vel = d / dt else a.vel = Vector3.zero end
+        end
+        fr[n].vel = Vector3.zero
+        return fr
+    end)
+
+    if not ok or type(frames) ~= "table" or #frames < 2 then
+        return nil, "dados inv\u{00E1}lidos"
+    end
+    macroCache[id] = frames
+    return frames
+end
+
+local function stopMacro(msg)
+    Macro.token += 1
+    local c = Macro.cleanup
+    Macro.cleanup = nil
+    if c then pcall(c) end
+    setStatus(msg or "Parado", false)
+end
+
+local function playMacro(frames, name)
+    stopMacro()
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp or hum.Health <= 0 then
+        setStatus("Personagem indispon\u{00ED}vel", false)
+        return
+    end
+
+    Macro.token += 1
+    local token = Macro.token
+    local animator = hum:FindFirstChildOfClass("Animator")
+    local animate = char:FindFirstChild("Animate")
+    local animateWasDisabled = animate and animate.Disabled
+    local tracks, currentAnim, lastState = {}, nil, nil
+    local n, idx = #frames, 1
+    local conn
+
+    -- desliga o Animate padrao enquanto roda (para nao misturar animacoes)
+    if animate and animator then
+        pcall(function() animate.Disabled = true end)
+        pcall(function()
+            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do tr:Stop(0) end
+        end)
+    end
+
+    local function setAnim(f)
+        local a = f.anim
+        if a == currentAnim then return end
+        currentAnim = a
+        if not animator then return end
+        local key = a and tostring(a[1]) or nil
+        for k, tr in pairs(tracks) do
+            if k ~= key and tr.IsPlaying then pcall(function() tr:Stop(0.1) end) end
+        end
+        if not a then return end
+        local tr = tracks[key]
+        if not tr then
+            local ok, t = pcall(function()
+                local anim = Instance.new("Animation")
+                anim.AnimationId = "rbxassetid://" .. key
+                return animator:LoadAnimation(anim)
+            end)
+            if ok and t then
+                tr = t
+                tracks[key] = tr
+                pcall(function() tr.Priority = Enum.AnimationPriority.Core end)
+            end
+        end
+        if tr then
+            pcall(function()
+                if tr.IsPlaying then
+                    tr:AdjustSpeed(a[2])
+                else
+                    tr:Play(0.1, 1, a[2])
+                end
+            end)
+        end
+    end
+
+    Macro.cleanup = function()
+        if conn then conn:Disconnect() end
+        for _, tr in pairs(tracks) do
+            pcall(function() tr:Stop(0.1) end)
+        end
+        if animate and animate.Parent and not animateWasDisabled then
+            pcall(function() animate.Disabled = false end)
+        end
+        pcall(function() hrp.AssemblyLinearVelocity = Vector3.zero end)
+    end
+
+    hrp.CFrame = frames[1].cf
+    local t0 = os.clock()
+    setStatus("Rodando: " .. name, true)
+
+    conn = RunService.Heartbeat:Connect(function()
+        if Macro.token ~= token then return end
+        if not hrp.Parent or hum.Health <= 0 or LocalPlayer.Character ~= char then
+            stopMacro("Interrompido")
+            return
+        end
+
+        local el = os.clock() - t0
+        while idx < n and frames[idx + 1].t <= el do idx += 1 end
+        local a = frames[idx]
+
+        if idx >= n then
+            hrp.CFrame = a.cf
+            stopMacro("Conclu\u{00ED}do: " .. name)
+            return
+        end
+
+        local b = frames[idx + 1]
+        local cf = a.cf
+        local span = b.t - a.t
+        -- suaviza entre pontos; se houver "salto" grande na gravacao, nao interpola
+        if span > 0 and (b.pos - a.pos).Magnitude < 8 then
+            cf = a.cf:Lerp(b.cf, math.clamp((el - a.t) / span, 0, 1))
+        end
+
+        hrp.CFrame = cf
+        hrp.AssemblyLinearVelocity = a.vel
+
+        if a.state ~= lastState then
+            lastState = a.state
+            pcall(function() hum:ChangeState(Enum.HumanoidStateType[a.state]) end)
+        end
+        setAnim(a)
+    end)
+end
+
+local requestId = 0
+local function runMacroFile(id, name)
+    if not id then
+        setStatus("Ainda sem arquivo: " .. name, false)
+        return
+    end
+    requestId += 1
+    local mine = requestId
+    task.spawn(function()
+        setStatus("Carregando: " .. name .. "...", false)
+        local frames, err = getFrames(id)
+        if mine ~= requestId then return end -- outro clique aconteceu enquanto carregava
+        if not frames then
+            setStatus("Falha (" .. tostring(err) .. "): " .. name, false)
+            return
+        end
+        playMacro(frames, name)
+    end)
+end
+
+--------------------------------------------------------------------
+-- PAGINA: PARKOUR (blocos)
+--------------------------------------------------------------------
+local PageParkour = makePage()
+
+-- status + botao de parar
+do
+    local c = new("Frame", {
+        LayoutOrder = 0, Size = UDim2.new(1, 0, 0, 52),
+        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+    }, PageParkour)
+    corner(c, 12)
+    stroke(c, GREEN, 1, 0.82)
+
+    local st = label(c, "", 12, Enum.Font.GothamMedium, MUTED)
+    st.Position = UDim2.new(0, 14, 0, 0)
+    st.Size = UDim2.new(1, -96, 1, 0)
+    st.TextWrapped = true
+
+    local stop = new("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
+        Size = UDim2.fromOffset(62, 30), BackgroundColor3 = Color3.fromRGB(24, 31, 27),
+        AutoButtonColor = false, Text = "Parar", TextSize = 12,
+        Font = Enum.Font.GothamBold, TextColor3 = MUTED,
+    }, c)
+    corner(stop, 15)
+    stroke(stop, GREEN, 1, 0.8)
+    stop.MouseButton1Click:Connect(function() stopMacro("Parado") end)
+
+    setStatus = function(text, running)
+        st.Text = text
+        st.TextColor3 = running and GREEN or MUTED
+        tween(stop, 0.15, {
+            TextColor3 = running and GREEN or MUTED,
+            BackgroundColor3 = running and Color3.fromRGB(32, 48, 40) or Color3.fromRGB(24, 31, 27),
+        })
+    end
+    setStatus("Nenhum parkour rodando", false)
+end
+
+local function sectionLabel(order, text)
+    local l = label(PageParkour, text, 11, Enum.Font.GothamBold, GREEN)
+    l.LayoutOrder = order
+    l.Size = UDim2.new(1, 0, 0, 18)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 4) }, l)
+    return l
+end
+
+-- bloco recolhivel: titulo ^ + opcoes
+-- prefix: se informado, aparece no nome do status ("Parkour 3 \u{00B7} R\u{00E1}pido")
+local function makeBlock(order, titleText, options, prefix)
+    local card = makeCard(PageParkour)
+    card.LayoutOrder = order
+    new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, card)
+
+    local header = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 42), BackgroundTransparency = 1,
+        Text = "", AutoButtonColor = false, LayoutOrder = 1,
+    }, card)
+
+    local ht = label(header, titleText, 14, Enum.Font.GothamBold, TEXT)
+    ht.Position = UDim2.new(0, 14, 0, 0)
+    ht.Size = UDim2.new(1, -50, 1, 0)
+
+    local arrow = label(header, "v", 16, Enum.Font.GothamBold, GREEN)
+    arrow.TextXAlignment = Enum.TextXAlignment.Center
+    arrow.Position = UDim2.new(1, -36, 0, 0)
+    arrow.Size = UDim2.fromOffset(24, 42)
+
+    local body = new("Frame", {
+        BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2,
+        Visible = false,
+    }, card)
+    new("UIPadding", {
+        PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
+        PaddingBottom = UDim.new(0, 10),
+    }, body)
+    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, body)
+
+    header.MouseButton1Click:Connect(function()
+        body.Visible = not body.Visible
+        arrow.Text = body.Visible and "^" or "v"
+    end)
+
+    for n, opt in ipairs(options) do
+        local optName, file = opt[1], opt[2]
+        local has = file ~= nil
+        local ob = new("TextButton", {
+            Size = UDim2.new(1, 0, 0, 34), LayoutOrder = n,
+            BackgroundColor3 = Color3.fromRGB(24, 31, 27), AutoButtonColor = false,
+            Text = has and optName or (optName .. "  \u{00B7}  em breve"),
+            TextSize = 13, Font = Enum.Font.GothamMedium,
+            TextColor3 = has and TEXT or MUTED, TextXAlignment = Enum.TextXAlignment.Left,
+        }, body)
+        corner(ob, 9)
+        new("UIPadding", { PaddingLeft = UDim.new(0, 28) }, ob)
+        local od = new("Frame", {
+            Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0, -16, 0.5, -3),
+            BackgroundColor3 = has and GREEN or MUTED, BorderSizePixel = 0,
+        }, ob)
+        corner(od, 3)
+
+        ob.MouseEnter:Connect(function() tween(ob, 0.15, { BackgroundColor3 = Color3.fromRGB(32, 48, 40) }) end)
+        ob.MouseLeave:Connect(function() tween(ob, 0.15, { BackgroundColor3 = Color3.fromRGB(24, 31, 27) }) end)
+        ob.MouseButton1Click:Connect(function()
+            ob.BackgroundColor3 = Color3.fromRGB(50, 110, 80)
+            tween(ob, 0.35, { BackgroundColor3 = Color3.fromRGB(24, 31, 27) })
+            runMacroFile(file, prefix and (prefix .. " \u{00B7} " .. optName) or optName)
+        end)
+    end
+end
+
+do
+    for i, blk in ipairs(PARKOUR_BLOCKS) do
+        makeBlock(i, blk[1], blk[2], blk[1])
+    end
+end
+
+--------------------------------------------------------------------
+-- HITBOX (modulo INDEPENDENTE: ScreenGui proprio, loop proprio,
+-- tudo protegido com pcall. Se algo falhar, o menu principal segue ok)
+--------------------------------------------------------------------
+local HitboxMenu = { onStatus = nil }
+
+do
+    local cfg = { Enabled = false, Size = 6, Transparency = 0.6, Color = GREEN }
+    local MIN_SIZE, MAX_SIZE = 2, 25
+    local originals = {}
+    local conns = {}
+    local hbGui, panel, hitScale
+    local alive = false
+    local opened = false
+
+    ----------------------------------------------------------------
+    -- logica (leve: so escreve quando algo muda, 4x por segundo)
+    ----------------------------------------------------------------
+    local function signature()
+        local c = cfg.Color
+        return string.format("%d|%.2f|%d,%d,%d", cfg.Size, cfg.Transparency,
+            math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+    end
+
+    local function applyOne(plr)
+        if plr == LocalPlayer then return end
+        local char = plr.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp or not hrp:IsA("BasePart") then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health <= 0 then return end
+
+        local o = originals[hrp]
+        if not o then
+            o = {
+                Size = hrp.Size, Transparency = hrp.Transparency, Color = hrp.Color,
+                CanCollide = hrp.CanCollide, Massless = hrp.Massless, sig = "",
+            }
+            originals[hrp] = o
+        end
+
+        local s = cfg.Size
+        local target = Vector3.new(s, s, s)
+        local sig = signature()
+        if o.sig == sig and hrp.Size == target then return end -- nada mudou
+        o.sig = sig
+
+        hrp.Massless = true      -- nao pesa: evita bagunçar a fisica
+        hrp.CanCollide = false
+        hrp.Size = target
+        hrp.Transparency = cfg.Transparency
+        hrp.Color = cfg.Color
+    end
+
+    local function restoreAll()
+        local snapshot = originals
+        originals = {}
+        for hrp, o in pairs(snapshot) do
+            if hrp and hrp.Parent then
+                pcall(function()
+                    hrp.Size = o.Size
+                    hrp.Transparency = o.Transparency
+                    hrp.Color = o.Color
+                    hrp.CanCollide = o.CanCollide
+                    hrp.Massless = o.Massless
+                end)
+            end
+        end
+    end
+
+    local function startLoop()
+        task.spawn(function()
+            while alive do
+                task.wait(0.25)
+                if cfg.Enabled then
+                    for _, plr in ipairs(Players:GetPlayers()) do
+                        pcall(applyOne, plr)
+                    end
+                    for hrp in pairs(originals) do
+                        if not hrp.Parent then originals[hrp] = nil end
+                    end
+                end
+            end
+        end)
+    end
+
+    ----------------------------------------------------------------
+    -- interface
+    ----------------------------------------------------------------
+    local function parentGui(g)
+        local targets = {}
+        if gethui then table.insert(targets, function() return gethui() end) end
+        table.insert(targets, function() return game:GetService("CoreGui") end)
+        table.insert(targets, function() return LocalPlayer:WaitForChild("PlayerGui") end)
+        for _, get in ipairs(targets) do
+            local ok, target = pcall(get)
+            if ok and target then
+                local ok2 = pcall(function() g.Parent = target end)
+                if ok2 and g.Parent == target then return true end
+            end
+        end
+        return false
+    end
+
+    local function bindSlide(hit, track, setRel)
+        local dragging = false
+        local function fromInput(input)
+            setRel((input.Position.X - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1))
+        end
+        hit.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                fromInput(input)
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then dragging = false end
+                end)
+            end
+        end)
+        table.insert(conns, UIS.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch) then
+                fromInput(input)
+            end
+        end))
+    end
+
+    local function makeKnob(track)
+        local k = new("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
+            Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.fromRGB(235, 255, 245),
+            BorderSizePixel = 0, ZIndex = 2,
+        }, track)
+        corner(k, 8)
+        stroke(k, GREEN, 1.5, 0)
+        return k
+    end
+
+    local function build()
+        local g = new("ScreenGui", {
+            Name = "NeyladHitboxGui", ResetOnSpawn = false, IgnoreGuiInset = true,
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 1000,
+        })
+
+        local p = new("Frame", {
+            Name = "HitboxPanel", AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            Size = UDim2.fromOffset(300, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+            BorderSizePixel = 0, ClipsDescendants = true, Active = true, Visible = false,
+        }, g)
+        corner(p, 18)
+        new("UIGradient", {
+            Rotation = 65,
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
+                ColorSequenceKeypoint.new(0.55, Color3.fromRGB(10, 14, 12)),
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
+            }),
+        }, p)
+        local pStroke = stroke(p, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
+        local pStrokeGrad = strokeGradient(pStroke)
+        local pShine = addShine(p)
+        local pScale = new("UIScale", { Scale = 0 }, p)
+
+        local titleBar = new("Frame", {
+            Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
+        }, p)
+        local d = new("Frame", {
+            Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
+            BackgroundColor3 = GREEN, BorderSizePixel = 0,
+        }, titleBar)
+        corner(d, 4)
+        local t = label(titleBar, "HITBOX", 15, Enum.Font.GothamBold, TEXT)
+        t.Position = UDim2.new(0, 32, 0, 0)
+        t.Size = UDim2.new(1, -90, 1, 0)
+
+        local closeBtn = new("TextButton", {
+            Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -40, 0.5, -14),
+            BackgroundColor3 = Color3.fromRGB(22, 28, 25), AutoButtonColor = false,
+            Text = "X", TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = MUTED,
+        }, titleBar)
+        corner(closeBtn, 14)
+        stroke(closeBtn, GREEN, 1, 0.8)
+        closeBtn.MouseEnter:Connect(function() tween(closeBtn, 0.15, { TextColor3 = GREEN }) end)
+        closeBtn.MouseLeave:Connect(function() tween(closeBtn, 0.15, { TextColor3 = MUTED }) end)
+        closeBtn.MouseButton1Click:Connect(function() HitboxMenu.close() end)
+
+        new("Frame", {
+            Size = UDim2.new(1, -32, 0, 1), Position = UDim2.new(0, 16, 0, 44),
+            BackgroundColor3 = GREEN, BackgroundTransparency = 0.85, BorderSizePixel = 0,
+        }, p)
+
+        makeDrag(titleBar, p, nil, nil, nil, conns)
+
+        local list = new("Frame", {
+            BackgroundTransparency = 1, Position = UDim2.new(0, 14, 0, 54),
+            Size = UDim2.new(1, -28, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        }, p)
+        new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+
+        local function row(order, height)
+            local r = new("Frame", {
+                LayoutOrder = order, Size = UDim2.new(1, 0, 0, height),
+                BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+            }, list)
+            corner(r, 12)
+            stroke(r, GREEN, 1, 0.82)
+            return r
+        end
+
+        -- 1) liga/desliga
+        local tr = row(1, 44)
+        local tl = label(tr, "Ativar hitbox", 13, Enum.Font.GothamMedium, TEXT)
+        tl.Position = UDim2.new(0, 14, 0, 0)
+        tl.Size = UDim2.new(1, -80, 1, 0)
+        local sw = new("TextButton", {
+            AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0),
+            Size = UDim2.fromOffset(44, 24), BackgroundColor3 = TRACK,
+            AutoButtonColor = false, Text = "",
+        }, tr)
+        corner(sw, 12)
+        local swKnob = new("Frame", {
+            Size = UDim2.fromOffset(18, 18), Position = UDim2.new(0, 3, 0.5, -9),
+            BackgroundColor3 = MUTED, BorderSizePixel = 0,
+        }, sw)
+        corner(swKnob, 9)
+
+        local function setEnabled(v)
+            cfg.Enabled = v
+            tween(sw, 0.18, { BackgroundColor3 = v and GREEN or TRACK })
+            tween(swKnob, 0.18, {
+                Position = v and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
+                BackgroundColor3 = v and Color3.fromRGB(8, 18, 12) or MUTED,
+            })
+            if not v then
+                task.spawn(function() pcall(restoreAll) end)
+            end
+            if HitboxMenu.onStatus then pcall(HitboxMenu.onStatus, v) end
+        end
+        -- a hitbox em si e aplicada pelo loop (fora do clique), entao o clique nunca trava
+        sw.MouseButton1Click:Connect(function() setEnabled(not cfg.Enabled) end)
+
+        -- 2) sliders
+        local function slider(order, name, min, max, default, decimals, suffix, onChange)
+            local r = row(order, 54)
+            local nl = label(r, name, 12, Enum.Font.GothamMedium, MUTED)
+            nl.Position = UDim2.new(0, 14, 0, 8)
+            nl.Size = UDim2.new(0.5, 0, 0, 16)
+            local vl = label(r, "", 12, Enum.Font.GothamBold, GREEN)
+            vl.TextXAlignment = Enum.TextXAlignment.Right
+            vl.Position = UDim2.new(0.5, 0, 0, 8)
+            vl.Size = UDim2.new(0.5, -14, 0, 16)
+
+            local track = new("Frame", {
+                Position = UDim2.new(0, 14, 0, 36), Size = UDim2.new(1, -28, 0, 6),
+                BackgroundColor3 = TRACK, BorderSizePixel = 0,
+            }, r)
+            corner(track, 3)
+            local fill = new("Frame", {
+                Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = GREEN, BorderSizePixel = 0,
+            }, track)
+            corner(fill, 3)
+            new("UIGradient", {
+                Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(70, 200, 130)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 255, 210)),
+                }),
+            }, fill)
+            local knob = makeKnob(track)
+            local hit = new("TextButton", {
+                Position = UDim2.new(0, 6, 0, 24), Size = UDim2.new(1, -12, 0, 28),
+                BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3,
+            }, r)
+
+            local fmt = "%." .. decimals .. "f"
+            local function render(rel, value)
+                fill.Size = UDim2.new(rel, 0, 1, 0)
+                knob.Position = UDim2.new(rel, 0, 0.5, 0)
+                vl.Text = string.format(fmt, value) .. suffix
+            end
+            render((default - min) / (max - min), default)
+
+            bindSlide(hit, track, function(rel)
+                rel = math.clamp(rel, 0, 1)
+                local value = tonumber(string.format(fmt, min + (max - min) * rel))
+                render(rel, value)
+                onChange(value)
+            end)
+        end
+
+        slider(2, "Tamanho", MIN_SIZE, MAX_SIZE, cfg.Size, 0, " studs", function(v) cfg.Size = v end)
+        slider(3, "Transpar\u{00EA}ncia", 0, 1, cfg.Transparency, 2, "", function(v) cfg.Transparency = v end)
+
+        -- 3) cor
+        do
+            local r = row(4, 102)
+            local nl = label(r, "Cor", 12, Enum.Font.GothamMedium, MUTED)
+            nl.Position = UDim2.new(0, 14, 0, 8)
+            nl.Size = UDim2.new(0.5, 0, 0, 16)
+
+            local preview = new("Frame", {
+                AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 8),
+                Size = UDim2.fromOffset(36, 16), BackgroundColor3 = cfg.Color, BorderSizePixel = 0,
+            }, r)
+            corner(preview, 8)
+            stroke(preview, Color3.fromRGB(255, 255, 255), 1, 0.7)
+
+            local track = new("Frame", {
+                Position = UDim2.new(0, 14, 0, 38), Size = UDim2.new(1, -28, 0, 8),
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0,
+            }, r)
+            corner(track, 4)
+            local kp = {}
+            for i = 0, 6 do
+                table.insert(kp, ColorSequenceKeypoint.new(i / 6, Color3.fromHSV(i / 6, 0.7, 1)))
+            end
+            new("UIGradient", { Color = ColorSequence.new(kp) }, track)
+            local knob = makeKnob(track)
+            local hit = new("TextButton", {
+                Position = UDim2.new(0, 6, 0, 26), Size = UDim2.new(1, -12, 0, 32),
+                BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3,
+            }, r)
+
+            local function setColor(c, moveKnob)
+                cfg.Color = c
+                preview.BackgroundColor3 = c
+                if moveKnob then
+                    local h, s = c:ToHSV()
+                    if s > 0.15 then knob.Position = UDim2.new(h, 0, 0.5, 0) end
+                end
+            end
+            setColor(cfg.Color, true)
+
+            bindSlide(hit, track, function(rel)
+                rel = math.clamp(rel, 0, 1)
+                knob.Position = UDim2.new(rel, 0, 0.5, 0)
+                setColor(Color3.fromHSV(rel, 0.7, 1), false)
+            end)
+
+            local presets = new("Frame", {
+                Position = UDim2.new(0, 14, 0, 66), Size = UDim2.new(1, -28, 0, 26),
+                BackgroundTransparency = 1,
+            }, r)
+            new("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder,
+            }, presets)
+
+            local colors = {
+                GREEN,
+                Color3.fromRGB(255, 70, 70),
+                Color3.fromRGB(70, 150, 255),
+                Color3.fromRGB(190, 100, 255),
+                Color3.fromRGB(255, 220, 70),
+                Color3.fromRGB(255, 255, 255),
+            }
+            for i, c in ipairs(colors) do
+                local b = new("TextButton", {
+                    LayoutOrder = i, Size = UDim2.fromOffset(30, 26),
+                    BackgroundColor3 = c, AutoButtonColor = false, Text = "",
+                }, presets)
+                corner(b, 8)
+                stroke(b, Color3.fromRGB(255, 255, 255), 1, 0.75)
+                b.MouseButton1Click:Connect(function() setColor(c, true) end)
+            end
+        end
+
+        new("Frame", {
+            LayoutOrder = 99, Size = UDim2.new(1, 0, 0, 6), BackgroundTransparency = 1,
+        }, list)
+
+        -- animacao continua (so enquanto o painel esta aberto)
+        table.insert(conns, RunService.Heartbeat:Connect(function()
+            if not opened then return end
+            local now = os.clock()
+            pStrokeGrad.Rotation = (now * 50) % 360
+            pShine.Offset = Vector2.new(math.min(1, -1 + ((now % 6) / 6) * 3), 0)
+        end))
+
+        if not parentGui(g) then
+            g:Destroy()
+            error("nao foi possivel anexar a GUI")
+        end
+
+        g.Destroying:Connect(function()
+            alive = false
+            cfg.Enabled = false
+            pcall(restoreAll)
+            for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+            conns = {}
+        end)
+
+        -- so publica o estado quando tudo deu certo
+        hbGui, panel, hitScale = g, p, pScale
+        alive = true
+        startLoop()
+    end
+
+    ----------------------------------------------------------------
+    -- API publica
+    ----------------------------------------------------------------
+    function HitboxMenu.open()
+        if not hbGui then
+            local ok, err = pcall(build)
+            if not ok then
+                warn("[Hitbox] falha ao criar o menu: " .. tostring(err))
+                return false
+            end
+        end
+        if opened then return true end
+        opened = true
+        panel.Visible = true
+        hitScale.Scale = 0.85
+        tweenEx(hitScale, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
+        return true
+    end
+
+    function HitboxMenu.close()
+        if not opened or not hitScale then return end
+        opened = false
+        tweenEx(hitScale, 0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, { Scale = 0 })
+        task.delay(0.24, function()
+            if not opened and panel then panel.Visible = false end
+        end)
+    end
+
+    function HitboxMenu.toggle()
+        if opened then HitboxMenu.close() else HitboxMenu.open() end
+    end
+
+    function HitboxMenu.destroy()
+        alive = false
+        cfg.Enabled = false
+        pcall(restoreAll)
+        if hbGui then pcall(function() hbGui:Destroy() end) end
+        for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+        conns = {}
+    end
+end
+
+--------------------------------------------------------------------
+-- PAGINA: COMBATE
+--------------------------------------------------------------------
+local PageCombat = makePage()
+
+do
+    local _, d = makeOpenCard(PageCombat, "Hitbox", "Abra o menu de hitbox", function()
+        local ok = pcall(HitboxMenu.toggle)
+        if not ok then
+            d.Text = "Falha ao abrir"
+            task.delay(1.5, function() d.Text = "Abra o menu de hitbox" end)
+        end
+    end)
+    HitboxMenu.onStatus = function(on)
+        d.Text = on and "Hitbox ativa" or "Abra o menu de hitbox"
+        d.TextColor3 = on and GREEN or MUTED
+    end
+end
+
+--------------------------------------------------------------------
+-- PAGINA: JJs
+--------------------------------------------------------------------
+local PageJJ = makePage()
+
+do
+    local busy = false
+    makeOpenCard(PageJJ, "Menu de JJs", "Abra o menu de JJs", function(d)
+        if busy then return end
+        busy = true
+        task.spawn(function()
+            d.Text = "Abrindo..."
+            local ok = pcall(function()
+                loadstring(game:HttpGet(JJS_URL))()
+            end)
+            d.Text = ok and "Menu aberto" or "Falha ao abrir"
+            task.wait(1.5)
+            d.Text = "Abra o menu de JJs"
+            busy = false
+        end)
+    end)
+end
+
+--------------------------------------------------------------------
+-- PAGINA: CREDITOS
+--------------------------------------------------------------------
+local PageCred = makePage()
+
+do
+    local c1 = makeCard(PageCred)
+    c1.LayoutOrder = 1
+    new("UIPadding", {
+        PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
+        PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+    }, c1)
+    new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, c1)
+
+    local l1 = label(c1, "CRIADOR DO SCRIPT", 11, Enum.Font.GothamBold, GREEN)
+    l1.Size = UDim2.new(1, 0, 0, 16); l1.LayoutOrder = 1
+    local l2 = label(c1, "Neylad", 22, Enum.Font.GothamBold, TEXT)
+    l2.Size = UDim2.new(1, 0, 0, 28); l2.LayoutOrder = 2
+    local l3 = label(c1, "discord", 12, Enum.Font.Gotham, MUTED)
+    l3.Size = UDim2.new(1, 0, 0, 16); l3.LayoutOrder = 3
+
+    local c2 = makeCard(PageCred)
+    c2.LayoutOrder = 2
+    new("UIPadding", {
+        PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
+        PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+    }, c2)
+    new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, c2)
+
+    local a1 = label(c2, "AVISO", 11, Enum.Font.GothamBold, GREEN)
+    a1.Size = UDim2.new(1, 0, 0, 16); a1.LayoutOrder = 1
+    local a2 = label(c2,
+        "Este menu parou na fase de testes. Para aumentar fun\u{00E7}\u{00F5}es ou adaptar para futuras atualiza\u{00E7}\u{00F5}es, contate o Criador.",
+        13, Enum.Font.Gotham, TEXT)
+    a2.TextWrapped = true
+    a2.Size = UDim2.new(1, 0, 0, 0)
+    a2.AutomaticSize = Enum.AutomaticSize.Y
+    a2.LayoutOrder = 2
+end
+
+--------------------------------------------------------------------
+-- ABAS (hotbar): Parkour | Combate | JJs | Creditos (ultima)
+--------------------------------------------------------------------
+local CRED = "Cr\u{00E9}ditos"
+local pages = {
+    ["Parkour"] = PageParkour,
+    ["Combate"] = PageCombat,
+    ["JJs"] = PageJJ,
+    [CRED] = PageCred,
+}
+local order = { "Parkour", "Combate", "JJs", CRED }
+local tabButtons = {}
+
+local function selectTab(name)
+    for n, page in pairs(pages) do
+        page.Visible = (n == name)
+    end
+    for n, b in pairs(tabButtons) do
+        local active = (n == name)
+        tween(b, 0.2, {
+            BackgroundTransparency = active and 0 or 1,
+            TextColor3 = active and Color3.fromRGB(8, 18, 12) or MUTED,
+        })
+    end
+end
+
+for idx, name in ipairs(order) do
+    local b = new("TextButton", {
+        Size = UDim2.new(0.25, -3, 1, 0), LayoutOrder = idx,
+        BackgroundColor3 = GREEN, BackgroundTransparency = 1,
+        AutoButtonColor = false, Text = name, TextSize = 12,
+        Font = Enum.Font.GothamBold, TextColor3 = MUTED,
+    }, barInner)
+    corner(b, 16)
+    new("UIGradient", {
+        Rotation = 90,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 255, 210)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 210, 140)),
+        }),
+    }, b)
+    tabButtons[name] = b
+    b.MouseButton1Click:Connect(function() selectTab(name) end)
+end
+
+selectTab(order[1])
+
+--------------------------------------------------------------------
+-- ABRIR / FECHAR MENU (animacoes)
+--------------------------------------------------------------------
+local isOpen = false
+local animating = false
+local shineStart = os.clock()
+
+local function showLogo()
+    Logo.Visible = true
+    logoScale.Scale = 0
+    tweenEx(logoScale, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
+end
+
+local function openMenu()
+    if animating or isOpen then return end
+    animating = true
+    isOpen = true
+
+    -- logo encolhe e some
+    tweenEx(logoScale, 0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, { Scale = 0 })
+
+    task.delay(0.12, function()
+        Logo.Visible = false
+        holderScale.Scale = 0.86
+        Holder.GroupTransparency = 1
+        Hotbar.Position = UDim2.new(0.5, 0, 0, HOTBAR_Y_HIDDEN)
+        Holder.Visible = true
+        shineStart = os.clock()
+
+        tweenEx(Holder, 0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, { GroupTransparency = 0 })
+        tweenEx(holderScale, 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
+        tweenEx(Hotbar, 0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0.14,
+            { Position = UDim2.new(0.5, 0, 0, HOTBAR_Y) })
+
+        task.delay(0.7, function() animating = false end)
+    end)
+end
+
+local function closeMenu()
+    if animating or not isOpen then return end
+    animating = true
+    isOpen = false
+
+
+    tweenEx(Hotbar, 0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0,
+        { Position = UDim2.new(0.5, 0, 0, HOTBAR_Y_HIDDEN) })
+    tweenEx(Holder, 0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0.08, { GroupTransparency = 1 })
+    tweenEx(holderScale, 0.34, Enum.EasingStyle.Back, Enum.EasingDirection.In, 0, { Scale = 0.86 })
+
+    task.delay(0.38, function()
+        Holder.Visible = false
+        showLogo()
+        task.delay(0.4, function() animating = false end)
+    end)
+end
+
+CloseBtn.MouseButton1Click:Connect(closeMenu)
+
+-- logo: arrasta e, se for so um toque, abre o menu
+makeDrag(Logo, Logo, openMenu,
+    function() if not isOpen then tween(logoScale, 0.1, { Scale = 0.94 }) end end,
+    function() if not isOpen then tween(logoScale, 0.15, { Scale = 1 }) end end)
+
+-- entrada da logo ao executar
+task.delay(0.15, function()
+    tweenEx(logoScale, 0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
+end)
+
+--------------------------------------------------------------------
+-- ANIMACOES CONTINUAS (shimmer, borda, pulso)
+--------------------------------------------------------------------
+local conn = RunService.Heartbeat:Connect(function()
+    local t = os.clock()
+    local rot = (t * 50) % 360
+    mainStrokeGrad.Rotation = rot
+    barStrokeGrad.Rotation = rot
+    logoStrokeGrad.Rotation = rot
+    mainShine.Offset = Vector2.new(math.min(1, -1 + (((t - shineStart) % 6) / 6) * 3), 0)
+    logoShine.Offset = Vector2.new(math.min(1, -1 + ((t % 5) / 5) * 3), 0)
+    logoDot.BackgroundTransparency = 0.35 + 0.35 * math.sin(t * 3)
+end)
+table.insert(connections, conn)
+
+gui.Destroying:Connect(function()
+    pcall(stopMacro)
+    pcall(HitboxMenu.destroy)
+    for _, c in ipairs(connections) do
+        pcall(function() c:Disconnect() end)
+    end
+end)
