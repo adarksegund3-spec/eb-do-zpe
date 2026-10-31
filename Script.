@@ -806,84 +806,139 @@ end
 local HitboxMenu = { onStatus = nil }
 
 do
-    local cfg = { Enabled = false, Size = 6, Transparency = 0.6, Color = GREEN }
+    local cfg = {
+        Enabled = false, Size = 6, Transparency = 0.6, Color = GREEN,
+        Range = 45,       -- so estende quem esta perto de voce (grande ganho de desempenho)
+        NoTouch = false,  -- desliga eventos de toque da hitbox (modo extra leve)
+    }
     local MIN_SIZE, MAX_SIZE = 2, 25
-    local originals = {}
+    local states = {}     -- [hrp] = { original..., on = bool, sig = string }
     local conns = {}
     local hbGui, panel, hitScale
     local alive = false
     local opened = false
 
-    ----------------------------------------------------------------
-    -- logica (leve: so escreve quando algo muda, 4x por segundo)
-    ----------------------------------------------------------------
+    local lastChange = 0
+    local SETTLE = 0.2        -- espera o slider assentar
+    local BUDGET = 0.0005     -- ~0,5 ms de CPU por frame no maximo para a hitbox
+    local cursor = 0          -- ponteiro round-robin entre os jogadores
+    local plist, lastList = {}, 0
+
+    local function touch() lastChange = os.clock() end
+
     local function signature()
         local c = cfg.Color
-        return string.format("%d|%.2f|%d,%d,%d", cfg.Size, cfg.Transparency,
-            math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+        return string.format("%d|%.2f|%d,%d,%d|%s", cfg.Size, cfg.Transparency,
+            math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5),
+            cfg.NoTouch and "n" or "t")
     end
 
-    local function applyOne(plr)
+    local function restoreOne(hrp, st)
+        if st.on and hrp.Parent then
+            pcall(function()
+                hrp.Size = st.Size
+                hrp.Transparency = st.Transparency
+                hrp.Color = st.Color
+                hrp.CanCollide = st.CanCollide
+                hrp.Massless = st.Massless
+                hrp.CastShadow = st.CastShadow
+                hrp.CanTouch = st.CanTouch
+            end)
+        end
+        st.on = false
+        st.sig = ""
+    end
+
+    -- restaura em lotes (sem pico de lag ao desligar). immediate = tudo de uma vez (ao destruir)
+    local function restoreAll(immediate)
+        local snap = {}
+        for hrp, st in pairs(states) do
+            if st.on then snap[hrp] = st end
+        end
+        local function run()
+            local n = 0
+            for hrp, st in pairs(snap) do
+                if cfg.Enabled and not immediate then return end -- religou no meio: aborta
+                restoreOne(hrp, st)
+                n += 1
+                if not immediate and n % 3 == 0 then task.wait() end
+            end
+        end
+        if immediate then run() else task.spawn(run) end
+    end
+
+    -- decide o estado de UM jogador (barato: so escreve o que realmente difere)
+    local function process(plr, sig, target, myPos)
         if plr == LocalPlayer then return end
         local char = plr.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp or not hrp:IsA("BasePart") then return end
         local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum and hum.Health <= 0 then return end
+        local alive_ = hum and hum.Health > 0
 
-        local o = originals[hrp]
-        if not o then
-            o = {
-                Size = hrp.Size, Transparency = hrp.Transparency, Color = hrp.Color,
-                CanCollide = hrp.CanCollide, Massless = hrp.Massless, sig = "",
-            }
-            originals[hrp] = o
-        end
+        local st = states[hrp]
+        local dist = (hrp.Position - myPos).Magnitude
+        local limit = (st and st.on) and (cfg.Range * 1.15) or cfg.Range -- histerese
+        local want = alive_ and dist <= limit
 
-        local s = cfg.Size
-        local target = Vector3.new(s, s, s)
-        local sig = signature()
-        if o.sig == sig and hrp.Size == target then return end -- nada mudou
-        o.sig = sig
-
-        hrp.Massless = true      -- nao pesa: evita bagunçar a fisica
-        hrp.CanCollide = false
-        hrp.Size = target
-        hrp.Transparency = cfg.Transparency
-        hrp.Color = cfg.Color
-    end
-
-    local function restoreAll()
-        local snapshot = originals
-        originals = {}
-        for hrp, o in pairs(snapshot) do
-            if hrp and hrp.Parent then
-                pcall(function()
-                    hrp.Size = o.Size
-                    hrp.Transparency = o.Transparency
-                    hrp.Color = o.Color
-                    hrp.CanCollide = o.CanCollide
-                    hrp.Massless = o.Massless
-                end)
+        if want then
+            if not st then
+                st = {
+                    Size = hrp.Size, Transparency = hrp.Transparency, Color = hrp.Color,
+                    CanCollide = hrp.CanCollide, Massless = hrp.Massless,
+                    CastShadow = hrp.CastShadow, CanTouch = hrp.CanTouch,
+                    on = false, sig = "",
+                }
+                states[hrp] = st
             end
+            if st.on and st.sig == sig and hrp.Size == target then return end
+            st.on = true
+            st.sig = sig
+            if not hrp.Massless then hrp.Massless = true end
+            if hrp.CanCollide then hrp.CanCollide = false end
+            if hrp.CastShadow then hrp.CastShadow = false end
+            if hrp.CanTouch == cfg.NoTouch then hrp.CanTouch = not cfg.NoTouch end
+            if hrp.Size ~= target then hrp.Size = target end
+            if hrp.Transparency ~= cfg.Transparency then hrp.Transparency = cfg.Transparency end
+            if hrp.Color ~= cfg.Color then hrp.Color = cfg.Color end
+        elseif st and st.on then
+            restoreOne(hrp, st)
         end
     end
 
-    local function startLoop()
-        task.spawn(function()
-            while alive do
-                task.wait(0.25)
-                if cfg.Enabled then
-                    for _, plr in ipairs(Players:GetPlayers()) do
-                        pcall(applyOne, plr)
-                    end
-                    for hrp in pairs(originals) do
-                        if not hrp.Parent then originals[hrp] = nil end
-                    end
+    -- motor: 1 conexao so, trabalha dentro de um orcamento de tempo por frame.
+    -- Ao ativar, os jogadores sao aplicados aos poucos (sem congelar a tela).
+    local function startEngine()
+        table.insert(conns, RunService.Heartbeat:Connect(function()
+            if not alive or not cfg.Enabled then return end
+            local t0 = os.clock()
+            if t0 - lastChange < SETTLE then return end
+
+            if t0 - lastList > 1 then
+                lastList = t0
+                plist = Players:GetPlayers()
+                for hrp in pairs(states) do
+                    if not hrp.Parent then states[hrp] = nil end
                 end
             end
-        end)
+            local n = #plist
+            if n == 0 then return end
+
+            local me = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not me then return end
+            local myPos = me.Position
+            local sig = signature()
+            local s = cfg.Size
+            local target = Vector3.new(s, s, s)
+
+            local done = 0
+            while done < n do
+                cursor = cursor % n + 1
+                pcall(process, plist[cursor], sig, target, myPos)
+                done += 1
+                if os.clock() - t0 > BUDGET then break end
+            end
+        end))
     end
 
     ----------------------------------------------------------------
@@ -1011,37 +1066,41 @@ do
             return r
         end
 
-        -- 1) liga/desliga
-        local tr = row(1, 44)
-        local tl = label(tr, "Ativar hitbox", 13, Enum.Font.GothamMedium, TEXT)
-        tl.Position = UDim2.new(0, 14, 0, 0)
-        tl.Size = UDim2.new(1, -80, 1, 0)
-        local sw = new("TextButton", {
-            AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0),
-            Size = UDim2.fromOffset(44, 24), BackgroundColor3 = TRACK,
-            AutoButtonColor = false, Text = "",
-        }, tr)
-        corner(sw, 12)
-        local swKnob = new("Frame", {
-            Size = UDim2.fromOffset(18, 18), Position = UDim2.new(0, 3, 0.5, -9),
-            BackgroundColor3 = MUTED, BorderSizePixel = 0,
-        }, sw)
-        corner(swKnob, 9)
+        -- 1) interruptores
+        local function switchRow(order, text, onToggle)
+            local tr = row(order, 44)
+            local tl = label(tr, text, 13, Enum.Font.GothamMedium, TEXT)
+            tl.Position = UDim2.new(0, 14, 0, 0)
+            tl.Size = UDim2.new(1, -80, 1, 0)
+            local sw = new("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0),
+                Size = UDim2.fromOffset(44, 24), BackgroundColor3 = TRACK,
+                AutoButtonColor = false, Text = "",
+            }, tr)
+            corner(sw, 12)
+            local swKnob = new("Frame", {
+                Size = UDim2.fromOffset(18, 18), Position = UDim2.new(0, 3, 0.5, -9),
+                BackgroundColor3 = MUTED, BorderSizePixel = 0,
+            }, sw)
+            corner(swKnob, 9)
 
-        local function setEnabled(v)
-            cfg.Enabled = v
-            tween(sw, 0.18, { BackgroundColor3 = v and GREEN or TRACK })
-            tween(swKnob, 0.18, {
-                Position = v and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
-                BackgroundColor3 = v and Color3.fromRGB(8, 18, 12) or MUTED,
-            })
-            if not v then
-                task.spawn(function() pcall(restoreAll) end)
-            end
-            if HitboxMenu.onStatus then pcall(HitboxMenu.onStatus, v) end
+            local state = false
+            sw.MouseButton1Click:Connect(function()
+                state = not state
+                tween(sw, 0.18, { BackgroundColor3 = state and GREEN or TRACK })
+                tween(swKnob, 0.18, {
+                    Position = state and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
+                    BackgroundColor3 = state and Color3.fromRGB(8, 18, 12) or MUTED,
+                })
+                onToggle(state)
+            end)
         end
-        -- a hitbox em si e aplicada pelo loop (fora do clique), entao o clique nunca trava
-        sw.MouseButton1Click:Connect(function() setEnabled(not cfg.Enabled) end)
+
+        switchRow(1, "Ativar hitbox", function(v)
+            cfg.Enabled = v
+            if not v then restoreAll() end
+            if HitboxMenu.onStatus then pcall(HitboxMenu.onStatus, v) end
+        end)
 
         -- 2) sliders
         local function slider(order, name, min, max, default, decimals, suffix, onChange)
@@ -1083,20 +1142,25 @@ do
             end
             render((default - min) / (max - min), default)
 
+            local lastValue = default
             bindSlide(hit, track, function(rel)
                 rel = math.clamp(rel, 0, 1)
                 local value = tonumber(string.format(fmt, min + (max - min) * rel))
                 render(rel, value)
-                onChange(value)
+                if value ~= lastValue then
+                    lastValue = value
+                    onChange(value)
+                end
             end)
         end
 
-        slider(2, "Tamanho", MIN_SIZE, MAX_SIZE, cfg.Size, 0, " studs", function(v) cfg.Size = v end)
-        slider(3, "Transpar\u{00EA}ncia", 0, 1, cfg.Transparency, 2, "", function(v) cfg.Transparency = v end)
+        slider(2, "Tamanho", MIN_SIZE, MAX_SIZE, cfg.Size, 0, " studs", function(v) cfg.Size = v; touch() end)
+        slider(3, "Alcance", 10, 150, cfg.Range, 0, " studs", function(v) cfg.Range = v; touch() end)
+        slider(4, "Transpar\u{00EA}ncia", 0, 1, cfg.Transparency, 2, "", function(v) cfg.Transparency = v; touch() end)
 
         -- 3) cor
         do
-            local r = row(4, 102)
+            local r = row(5, 102)
             local nl = label(r, "Cor", 12, Enum.Font.GothamMedium, MUTED)
             nl.Position = UDim2.new(0, 14, 0, 8)
             nl.Size = UDim2.new(0.5, 0, 0, 16)
@@ -1126,6 +1190,7 @@ do
 
             local function setColor(c, moveKnob)
                 cfg.Color = c
+                touch()
                 preview.BackgroundColor3 = c
                 if moveKnob then
                     local h, s = c:ToHSV()
@@ -1168,13 +1233,22 @@ do
             end
         end
 
+        switchRow(6, "Modo extra leve (sem toque)", function(v)
+            cfg.NoTouch = v
+            touch()
+        end)
+
         new("Frame", {
             LayoutOrder = 99, Size = UDim2.new(1, 0, 0, 6), BackgroundTransparency = 1,
         }, list)
 
         -- animacao continua (so enquanto o painel esta aberto)
-        table.insert(conns, RunService.Heartbeat:Connect(function()
+        local pAcc = 0
+        table.insert(conns, RunService.Heartbeat:Connect(function(dt)
             if not opened then return end
+            pAcc += dt
+            if pAcc < 0.05 then return end
+            pAcc = 0
             local now = os.clock()
             pStrokeGrad.Rotation = (now * 50) % 360
             pShine.Offset = Vector2.new(math.min(1, -1 + ((now % 6) / 6) * 3), 0)
@@ -1188,7 +1262,7 @@ do
         g.Destroying:Connect(function()
             alive = false
             cfg.Enabled = false
-            pcall(restoreAll)
+            pcall(restoreAll, true)
             for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
             conns = {}
         end)
@@ -1196,7 +1270,7 @@ do
         -- so publica o estado quando tudo deu certo
         hbGui, panel, hitScale = g, p, pScale
         alive = true
-        startLoop()
+        startEngine()
     end
 
     ----------------------------------------------------------------
@@ -1234,7 +1308,7 @@ do
     function HitboxMenu.destroy()
         alive = false
         cfg.Enabled = false
-        pcall(restoreAll)
+        pcall(restoreAll, true)
         if hbGui then pcall(function() hbGui:Destroy() end) end
         for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
         conns = {}
@@ -1247,7 +1321,9 @@ end
 local PageCombat = makePage()
 
 do
-    local _, d = makeOpenCard(PageCombat, "Hitbox", "Abra o menu de hitbox", function()
+    local d
+    local _
+    _, d = makeOpenCard(PageCombat, "Hitbox", "Abra o menu de hitbox", function()
         local ok = pcall(HitboxMenu.toggle)
         if not ok then
             d.Text = "Falha ao abrir"
@@ -1266,19 +1342,46 @@ end
 local PageJJ = makePage()
 
 do
-    local busy = false
+    local lastClick = 0
+    local token = 0
+    local jjFn -- codigo ja baixado/compilado (evita baixar de novo e tomar rate limit)
+
     makeOpenCard(PageJJ, "Menu de JJs", "Abra o menu de JJs", function(d)
-        if busy then return end
-        busy = true
-        task.spawn(function()
-            d.Text = "Abrindo..."
-            local ok = pcall(function()
-                loadstring(game:HttpGet(JJS_URL))()
-            end)
+        -- so um anti-spam curto; NUNCA fica preso esperando o script dos JJs
+        if os.clock() - lastClick < 0.6 then return end
+        lastClick = os.clock()
+        token += 1
+        local mine = token
+        d.Text = "Abrindo..."
+
+        local function finish(ok)
+            if mine ~= token then return end
             d.Text = ok and "Menu aberto" or "Falha ao abrir"
-            task.wait(1.5)
-            d.Text = "Abra o menu de JJs"
-            busy = false
+            task.delay(1.5, function()
+                if mine == token then d.Text = "Abra o menu de JJs" end
+            end)
+        end
+
+        task.spawn(function()
+            if not jjFn then
+                local ok, res = pcall(function() return game:HttpGet(JJS_URL) end)
+                if not ok or type(res) ~= "string" or #res == 0 then
+                    warn("[JJs] falha ao baixar: " .. tostring(res))
+                    return finish(false)
+                end
+                local fn, cerr = loadstring(res)
+                if not fn then
+                    warn("[JJs] falha ao compilar: " .. tostring(cerr))
+                    return finish(false)
+                end
+                jjFn = fn
+            end
+            -- roda em thread propria: se o script dos JJs tiver loop infinito, o botao continua livre
+            task.spawn(function()
+                local ok, err = pcall(jjFn)
+                if not ok then warn("[JJs] erro no script: " .. tostring(err)) end
+            end)
+            finish(true)
         end)
     end)
 end
@@ -1441,15 +1544,23 @@ end)
 --------------------------------------------------------------------
 -- ANIMACOES CONTINUAS (shimmer, borda, pulso)
 --------------------------------------------------------------------
-local conn = RunService.Heartbeat:Connect(function()
+local animAcc = 0
+local conn = RunService.Heartbeat:Connect(function(dt)
+    animAcc += dt
+    if animAcc < 0.05 then return end -- ~20 fps basta para brilho/borda
+    animAcc = 0
     local t = os.clock()
-    local rot = (t * 50) % 360
-    mainStrokeGrad.Rotation = rot
-    barStrokeGrad.Rotation = rot
-    logoStrokeGrad.Rotation = rot
-    mainShine.Offset = Vector2.new(math.min(1, -1 + (((t - shineStart) % 6) / 6) * 3), 0)
-    logoShine.Offset = Vector2.new(math.min(1, -1 + ((t % 5) / 5) * 3), 0)
-    logoDot.BackgroundTransparency = 0.35 + 0.35 * math.sin(t * 3)
+    if Holder.Visible then
+        local rot = (t * 50) % 360
+        mainStrokeGrad.Rotation = rot
+        barStrokeGrad.Rotation = rot
+        mainShine.Offset = Vector2.new(math.min(1, -1 + (((t - shineStart) % 6) / 6) * 3), 0)
+    end
+    if Logo.Visible then
+        logoStrokeGrad.Rotation = (t * 50) % 360
+        logoShine.Offset = Vector2.new(math.min(1, -1 + ((t % 5) / 5) * 3), 0)
+        logoDot.BackgroundTransparency = 0.35 + 0.35 * math.sin(t * 3)
+    end
 end)
 table.insert(connections, conn)
 
